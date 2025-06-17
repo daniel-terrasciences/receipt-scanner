@@ -1,10 +1,54 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Upload, FileText, Download, Eye, Trash2, Plus, Zap } from 'lucide-react';
 import { parseDate, parseProvider, parseAmount, categorizeExpense } from '@/lib/parsers';
 import { convertToGBP } from '@/lib/currency';
 
+// SVG Icon Components
+const Upload = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+  </svg>
+);
+
+const FileText = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const Download = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+
+const Eye = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+  </svg>
+);
+
+const Trash2 = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+const Plus = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+  </svg>
+);
+
+const Zap = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+  </svg>
+);
+
+// Interfaces
 interface UploadedFile {
   id: string;
   name: string;
@@ -27,17 +71,9 @@ interface ProcessedReceipt {
   ocrText: string;
 }
 
-// Mock upload function for development
-async function mockUploadReceiptImage(file: File, employeeName: string) {
-  return new Promise<{id: string, url: string, name: string}>((resolve) => {
-    setTimeout(() => {
-      resolve({
-        id: Date.now() + Math.random().toString(),
-        url: URL.createObjectURL(file),
-        name: file.name
-      });
-    }, 1000);
-  });
+// Simple file handling without Firebase
+function createFileUrl(file: File): string {
+  return URL.createObjectURL(file);
 }
 
 export default function ReceiptScannerApp() {
@@ -59,15 +95,17 @@ export default function ReceiptScannerApp() {
 
     for (const file of Array.from(files)) {
       try {
-        // Use mock upload for development - replace with real Firebase later
-        const uploadResult = await mockUploadReceiptImage(file, currentEmployee);
+        // Simple local file handling
+        const fileUrl = createFileUrl(file);
         newFiles.push({
-          ...uploadResult,
+          id: Date.now() + Math.random().toString(),
+          url: fileUrl,
+          name: file.name,
           employee: currentEmployee,
           status: 'uploaded'
         });
       } catch (error) {
-        console.error('Upload failed:', error);
+        console.error('File processing failed:', error);
       }
     }
 
@@ -81,46 +119,74 @@ export default function ReceiptScannerApp() {
 
     for (const file of uploadedFiles) {
       try {
-        // For development, we'll use mock data
-        // Later replace with actual API call
-        const mockOcrText = `RECEIPT
-${file.employee}'s Expense
-Date: ${new Date().toLocaleDateString()}
-Total: £${(Math.random() * 100).toFixed(2)}
-Payment: Credit Card
-Thank you!`;
+        console.log('Processing:', file.name);
+        
+        // Convert file URL to blob for OCR processing
+        const response = await fetch(file.url);
+        const blob = await response.blob();
+        
+        // Create FormData for API call
+        const formData = new FormData();
+        formData.append('image', blob, file.name);
+        
+        // Call OCR API
+        const ocrResponse = await fetch('/api/process-receipt', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!ocrResponse.ok) {
+          const errorData = await ocrResponse.json();
+          throw new Error(`OCR API error: ${errorData.error || ocrResponse.statusText}`);
+        }
+        
+        const { text: ocrText } = await ocrResponse.json();
+        console.log('OCR result for', file.name, ':', ocrText.substring(0, 100) + '...');
         
         // Parse receipt data
-        const date = parseDate(mockOcrText);
-        const provider = parseProvider(mockOcrText) || "Sample Restaurant";
-        const { currency, amount } = parseAmount(mockOcrText);
-        const category = categorizeExpense(mockOcrText);
+        const date = parseDate(ocrText);
+        const provider = parseProvider(ocrText);
+        const { currency, amount } = parseAmount(ocrText);
+        const category = categorizeExpense(ocrText);
         
         // Convert to GBP
-        const gbpAmount = await convertToGBP(amount, currency === '£' ? 'GBP' : 'USD');
+        const gbpAmount = await convertToGBP(amount, currency === '£' ? 'GBP' : currency.replace(/[£$€]/g, ''));
 
         processed.push({
           id: file.id,
           fileName: file.name,
           employee: file.employee,
           date: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          provider,
+          provider: provider || 'Unknown Provider',
           category,
           paymentMethod: 'Credit Card',
           country: 'UK',
           originalAmount: `${currency}${amount.toFixed(2)}`,
           gbpAmount: gbpAmount.toFixed(2),
-          ocrText: mockOcrText
+          ocrText
         });
       } catch (error) {
         console.error('Processing failed for', file.name, error);
+        // Add failed processing entry
+        processed.push({
+          id: file.id,
+          fileName: file.name,
+          employee: file.employee,
+          date: new Date().toISOString().split('T')[0],
+          provider: 'Processing Failed',
+          category: 'Error',
+          paymentMethod: 'Unknown',
+          country: 'Unknown',
+          originalAmount: '£0.00',
+          gbpAmount: '0.00',
+          ocrText: `Error: ${error}`
+        });
       }
     }
 
     setProcessedReceipts(processed);
     setIsProcessing(false);
   };
-
   const exportToCSV = () => {
     const headers = [
       'File Name', 'Employee', 'Date', 'Provider', 'Category', 
@@ -172,9 +238,21 @@ Thank you!`;
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-4">
-              {/* Logo placeholder - Replace with your actual logo */}
+              {/* Logo - Replace with your actual logo */}
+              <img 
+                src="/logo.png" 
+                alt="Company Logo" 
+                className="w-10 h-10 object-contain"
+                onError={(e) => {
+                  // Fallback to colored placeholder if logo.png doesn't exist
+                  const target = e.target as HTMLImageElement;
+                  target.style.display = 'none';
+                  target.nextElementSibling?.setAttribute('style', 'display: flex');
+                }}
+              />
+              {/* Fallback logo placeholder */}
               <div 
-                className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg" 
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg hidden" 
                 style={{ backgroundColor: '#282c34' }}
               >
                 R

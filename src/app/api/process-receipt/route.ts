@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-// For now, we'll create a mock OCR function
-// Replace this with actual Google Vision implementation later
-async function mockOCR(imageBuffer: Buffer): Promise<string> {
-  // Mock OCR response - replace with actual Google Vision API
-  return `MOCK RECEIPT
-Restaurant Name
-Date: ${new Date().toLocaleDateString()}
-Total: £15.50
-Payment: Credit Card
-Thank you!`;
-}
+import { extractTextFromImage } from '@/lib/vision';
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Received OCR request');
+    
     const formData = await request.formData();
     const file = formData.get('image') as File;
     
@@ -21,17 +12,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No image provided' }, { status: 400 });
     }
     
+    console.log('Processing file:', file.name, 'Size:', file.size);
+    
+    // Convert file to buffer
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
     
-    // Use mock OCR for now - replace with Google Vision later
-    const extractedText = await mockOCR(buffer);
+    // Extract text using Google Vision API
+    const extractedText = await extractTextFromImage(buffer);
     
-    return NextResponse.json({ text: extractedText });
+    return NextResponse.json({ 
+      text: extractedText,
+      success: true 
+    });
   } catch (error) {
     console.error('OCR processing error:', error);
     return NextResponse.json(
-      { error: 'Failed to process image' },
+      { 
+        error: 'Failed to process image',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
