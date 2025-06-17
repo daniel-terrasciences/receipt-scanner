@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { parseDate, parseProvider, parseAmount, categorizeExpense } from '@/lib/parsers';
 import { convertToGBP } from '@/lib/currency';
 
-// SVG Icon Components (already in your code - keep these)
+// SVG Icon Components
 const Upload = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -48,6 +48,12 @@ const Zap = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const X = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" width="1em" height="1em">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
 // Interfaces
 interface UploadedFile {
   id: string;
@@ -67,14 +73,50 @@ interface ProcessedReceipt {
   paymentMethod: string;
   country: string;
   originalAmount: string;
+  originalCurrency: string;
+  originalAmountValue: number;
   gbpAmount: string;
   ocrText: string;
+  imageUrl: string;
 }
 
 // Simple file handling without Firebase
 function createFileUrl(file: File): string {
   return URL.createObjectURL(file);
 }
+
+// Currency options
+const CURRENCIES = [
+  { code: 'GBP', symbol: '£', name: 'British Pound' },
+  { code: 'USD', symbol: '$', name: 'US Dollar' },
+  { code: 'EUR', symbol: '€', name: 'Euro' },
+  { code: 'CAD', symbol: 'C$', name: 'Canadian Dollar' },
+  { code: 'AUD', symbol: 'A$', name: 'Australian Dollar' },
+  { code: 'JPY', symbol: '¥', name: 'Japanese Yen' },
+];
+
+// Category options
+const CATEGORIES = [
+  'Flight',
+  'Train/Tube',
+  'Taxi',
+  'Car Hire/Fuel',
+  'Hotel',
+  'Subsistence',
+  'Office Supplies',
+  'Software/IT',
+  'Other'
+];
+
+// Payment method options
+const PAYMENT_METHODS = [
+  'Credit Card',
+  'Debit Card',
+  'Cash',
+  'Bank Transfer',
+  'PayPal',
+  'Other'
+];
 
 export default function ReceiptScannerApp() {
   const [employees, setEmployees] = useState<string[]>([]);
@@ -83,6 +125,8 @@ export default function ReceiptScannerApp() {
   const [processedReceipts, setProcessedReceipts] = useState<ProcessedReceipt[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [baseCurrency, setBaseCurrency] = useState('GBP');
 
   const handleFileUpload = async (files: FileList) => {
     if (!currentEmployee.trim()) {
@@ -95,7 +139,6 @@ export default function ReceiptScannerApp() {
 
     for (const file of Array.from(files)) {
       try {
-        // Simple local file handling
         const fileUrl = createFileUrl(file);
         newFiles.push({
           id: Date.now() + Math.random().toString(),
@@ -121,15 +164,12 @@ export default function ReceiptScannerApp() {
       try {
         console.log('Processing:', file.name);
         
-        // Convert file URL to blob for OCR processing
         const response = await fetch(file.url);
         const blob = await response.blob();
         
-        // Create FormData for API call
         const formData = new FormData();
         formData.append('image', blob, file.name);
         
-        // Call OCR API
         const ocrResponse = await fetch('/api/process-receipt', {
           method: 'POST',
           body: formData,
@@ -143,13 +183,11 @@ export default function ReceiptScannerApp() {
         const { text: ocrText } = await ocrResponse.json();
         console.log('OCR result for', file.name, ':', ocrText.substring(0, 100) + '...');
         
-        // Parse receipt data
         const date = parseDate(ocrText);
         const provider = parseProvider(ocrText);
         const { currency, amount } = parseAmount(ocrText);
         const category = categorizeExpense(ocrText);
         
-        // Convert to GBP
         const gbpAmount = await convertToGBP(amount, currency === '£' ? 'GBP' : currency.replace(/[£$€]/g, ''));
 
         processed.push({
@@ -162,24 +200,29 @@ export default function ReceiptScannerApp() {
           paymentMethod: 'Credit Card',
           country: 'UK',
           originalAmount: `${currency}${amount.toFixed(2)}`,
+          originalCurrency: currency === '£' ? 'GBP' : currency.replace(/[£$€]/g, '') || 'GBP',
+          originalAmountValue: amount,
           gbpAmount: gbpAmount.toFixed(2),
-          ocrText
+          ocrText,
+          imageUrl: file.url
         });
       } catch (error) {
         console.error('Processing failed for', file.name, error);
-        // Add failed processing entry
         processed.push({
           id: file.id,
           fileName: file.name,
           employee: file.employee,
           date: new Date().toISOString().split('T')[0],
           provider: 'Processing Failed',
-          category: 'Error',
+          category: 'Other',
           paymentMethod: 'Unknown',
           country: 'Unknown',
           originalAmount: '£0.00',
+          originalCurrency: 'GBP',
+          originalAmountValue: 0,
           gbpAmount: '0.00',
-          ocrText: `Error: ${error}`
+          ocrText: `Error: ${error}`,
+          imageUrl: file.url
         });
       }
     }
@@ -187,10 +230,33 @@ export default function ReceiptScannerApp() {
     setProcessedReceipts(processed);
     setIsProcessing(false);
   };
+
+  const updateReceipt = async (id: string, field: string, value: any) => {
+    setProcessedReceipts(prev => prev.map(receipt => {
+      if (receipt.id === id) {
+        const updated = { ...receipt, [field]: value };
+        
+        // If currency or amount changed, recalculate GBP amount
+        if (field === 'originalCurrency' || field === 'originalAmountValue') {
+          convertToGBP(updated.originalAmountValue, updated.originalCurrency).then(gbpAmount => {
+            setProcessedReceipts(currentReceipts => 
+              currentReceipts.map(r => 
+                r.id === id ? { ...r, gbpAmount: gbpAmount.toFixed(2) } : r
+              )
+            );
+          });
+        }
+        
+        return updated;
+      }
+      return receipt;
+    }));
+  };
+
   const exportToCSV = () => {
     const headers = [
       'File Name', 'Employee', 'Date', 'Provider', 'Category', 
-      'Payment Method', 'Country', 'Original Amount', 'GBP Amount'
+      'Payment Method', 'Country', 'Original Amount', 'Original Currency', `${baseCurrency} Amount`
     ];
     
     const csvContent = [
@@ -203,7 +269,8 @@ export default function ReceiptScannerApp() {
         `"${receipt.category}"`,
         `"${receipt.paymentMethod}"`,
         `"${receipt.country}"`,
-        `"${receipt.originalAmount}"`,
+        `"${receipt.originalAmountValue.toFixed(2)}"`,
+        `"${receipt.originalCurrency}"`,
         `"${receipt.gbpAmount}"`
       ].join(','))
     ].join('\n');
@@ -238,19 +305,16 @@ export default function ReceiptScannerApp() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <div className="flex items-center space-x-4">
-              {/* Logo - Replace with your actual logo */}
               <img 
                 src="/logo.png" 
                 alt="Company Logo" 
                 className="w-10 h-10 object-contain"
                 onError={(e) => {
-                  // Fallback to colored placeholder if logo.png doesn't exist
                   const target = e.target as HTMLImageElement;
                   target.style.display = 'none';
                   target.nextElementSibling?.setAttribute('style', 'display: flex');
                 }}
               />
-              {/* Fallback logo placeholder */}
               <div 
                 className="w-10 h-10 rounded-lg flex items-center justify-center text-white font-bold text-lg hidden" 
                 style={{ backgroundColor: '#282c34' }}
@@ -298,6 +362,24 @@ export default function ReceiptScannerApp() {
                     <span>Add</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Currency Selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Base Currency (for export)
+                </label>
+                <select
+                  value={baseCurrency}
+                  onChange={(e) => setBaseCurrency(e.target.value)}
+                  className="border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  {CURRENCIES.map(currency => (
+                    <option key={currency.code} value={currency.code}>
+                      {currency.symbol} {currency.name} ({currency.code})
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* File Upload */}
@@ -409,7 +491,7 @@ export default function ReceiptScannerApp() {
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Total Value:</span>
                   <span className="text-sm font-medium">
-                    £{processedReceipts.reduce((sum, r) => sum + parseFloat(r.gbpAmount || '0'), 0).toFixed(2)}
+                    {CURRENCIES.find(c => c.code === baseCurrency)?.symbol}{processedReceipts.reduce((sum, r) => sum + parseFloat(r.gbpAmount || '0'), 0).toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -449,29 +531,87 @@ export default function ReceiptScannerApp() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 px-3 font-medium text-gray-900">File</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-900">Image</th>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">Employee</th>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">Date</th>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">Provider</th>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">Category</th>
                         <th className="text-left py-2 px-3 font-medium text-gray-900">Amount</th>
-                        <th className="text-left py-2 px-3 font-medium text-gray-900">GBP</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-900">Currency</th>
+                        <th className="text-left py-2 px-3 font-medium text-gray-900">{baseCurrency}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {processedReceipts.map((receipt) => (
                         <tr key={receipt.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-2 px-3 text-gray-900">{receipt.fileName}</td>
-                          <td className="py-2 px-3 text-gray-600">{receipt.employee}</td>
-                          <td className="py-2 px-3 text-gray-600">{receipt.date}</td>
-                          <td className="py-2 px-3 text-gray-600">{receipt.provider}</td>
                           <td className="py-2 px-3">
-                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                              {receipt.category}
-                            </span>
+                            <img
+                              src={receipt.imageUrl}
+                              alt={receipt.fileName}
+                              className="w-12 h-12 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                              onClick={() => setSelectedImage(receipt.imageUrl)}
+                            />
                           </td>
-                          <td className="py-2 px-3 text-gray-600">{receipt.originalAmount}</td>
-                          <td className="py-2 px-3 font-medium text-gray-900">£{receipt.gbpAmount}</td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={receipt.employee}
+                              onChange={(e) => updateReceipt(receipt.id, 'employee', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="date"
+                              value={receipt.date}
+                              onChange={(e) => updateReceipt(receipt.id, 'date', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="text"
+                              value={receipt.provider}
+                              onChange={(e) => updateReceipt(receipt.id, 'provider', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={receipt.category}
+                              onChange={(e) => updateReceipt(receipt.id, 'category', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              {CATEGORIES.map(category => (
+                                <option key={category} value={category}>{category}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={receipt.originalAmountValue}
+                              onChange={(e) => updateReceipt(receipt.id, 'originalAmountValue', parseFloat(e.target.value) || 0)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-2 px-3">
+                            <select
+                              value={receipt.originalCurrency}
+                              onChange={(e) => updateReceipt(receipt.id, 'originalCurrency', e.target.value)}
+                              className="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            >
+                              {CURRENCIES.map(currency => (
+                                <option key={currency.code} value={currency.code}>
+                                  {currency.code}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="py-2 px-3 font-medium text-gray-900">
+                            {CURRENCIES.find(c => c.code === baseCurrency)?.symbol}{receipt.gbpAmount}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -482,6 +622,30 @@ export default function ReceiptScannerApp() {
           </div>
         )}
       </div>
+
+      {/* Image Modal */}
+      {selectedImage && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-semibold">Receipt Image</h3>
+              <button
+                onClick={() => setSelectedImage(null)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-4">
+              <img
+                src={selectedImage}
+                alt="Receipt"
+                className="max-w-full max-h-[70vh] object-contain mx-auto"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
